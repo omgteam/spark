@@ -18,26 +18,73 @@
 package org.apache.spark
 
 // scalastyle:off
+import java.io.File
+
 import org.scalatest.{BeforeAndAfterAll, FunSuite, Outcome}
 
 import org.apache.spark.internal.Logging
+import org.apache.spark.util.{AccumulatorContext, Utils}
 
 /**
  * Base abstract class for all unit tests in Spark for handling common functionality.
+ *
+ * Thread audit happens normally here automatically when a new test suite created.
+ * The only prerequisite for that is that the test class must extend [[SparkFunSuite]].
+ *
+ * It is possible to override the default thread audit behavior by setting enableAutoThreadAudit
+ * to false and manually calling the audit methods, if desired. For example:
+ *
+ * class MyTestSuite extends SparkFunSuite {
+ *
+ *   override val enableAutoThreadAudit = false
+ *
+ *   protected override def beforeAll(): Unit = {
+ *     doThreadPreAudit()
+ *     super.beforeAll()
+ *   }
+ *
+ *   protected override def afterAll(): Unit = {
+ *     super.afterAll()
+ *     doThreadPostAudit()
+ *   }
+ * }
  */
-private[spark] abstract class SparkFunSuite
+abstract class SparkFunSuite
   extends FunSuite
   with BeforeAndAfterAll
+  with ThreadAudit
   with Logging {
 // scalastyle:on
+
+  protected val enableAutoThreadAudit = true
+
+  protected override def beforeAll(): Unit = {
+    System.setProperty("spark.testing", "true")
+    if (enableAutoThreadAudit) {
+      doThreadPreAudit()
+    }
+    super.beforeAll()
+  }
 
   protected override def afterAll(): Unit = {
     try {
       // Avoid leaking map entries in tests that use accumulators without SparkContext
-      Accumulators.clear()
+      AccumulatorContext.clear()
     } finally {
       super.afterAll()
+      if (enableAutoThreadAudit) {
+        doThreadPostAudit()
+      }
     }
+  }
+
+  // helper function
+  protected final def getTestResourceFile(file: String): File = {
+    new File(getClass.getClassLoader.getResource(file).getFile)
+  }
+
+  protected final def getTestResourcePath(file: String): String = {
+    getTestResourceFile(file).getCanonicalPath
   }
 
   /**
@@ -59,4 +106,14 @@ private[spark] abstract class SparkFunSuite
     }
   }
 
+  /**
+   * Creates a temporary directory, which is then passed to `f` and will be deleted after `f`
+   * returns.
+   */
+  protected def withTempDir(f: File => Unit): Unit = {
+    val dir = Utils.createTempDir()
+    try f(dir) finally {
+      Utils.deleteRecursively(dir)
+    }
+  }
 }

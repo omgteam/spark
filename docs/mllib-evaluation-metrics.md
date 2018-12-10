@@ -1,7 +1,7 @@
 ---
 layout: global
-title: Evaluation Metrics - spark.mllib
-displayTitle: Evaluation Metrics - spark.mllib
+title: Evaluation Metrics - RDD-based API
+displayTitle: Evaluation Metrics - RDD-based API
 ---
 
 * Table of contents
@@ -13,7 +13,7 @@ of the model on some criteria, which depends on the application and its requirem
 suite of metrics for the purpose of evaluating the performance of machine learning models.
 
 Specific machine learning algorithms fall under broader types of machine learning applications like classification,
-regression, clustering, etc. Each of these types have well established metrics for performance evaluation and those
+regression, clustering, etc. Each of these types have well-established metrics for performance evaluation and those
 metrics that are currently available in `spark.mllib` are detailed in this section.
 
 ## Classification model evaluation
@@ -140,7 +140,7 @@ definitions of positive and negative labels is straightforward.
 #### Label based metrics
 
 Opposed to binary classification where there are only two possible labels, multiclass classification problems have many
-possible labels and so the concept of label-based metrics is introduced. Overall precision measures precision across all
+possible labels and so the concept of label-based metrics is introduced. Accuracy measures precision across all
 labels -  the number of times any class was predicted correctly (true positives) normalized by the number of data
 points. Precision by label considers only one class, and measures the number of time a specific label was predicted
 correctly normalized by the number of times that label appears in the output.
@@ -182,19 +182,9 @@ $$\hat{\delta}(x) = \begin{cases}1 & \text{if $x = 0$}, \\ 0 & \text{otherwise}.
       </td>
     </tr>
     <tr>
-      <td>Overall Precision</td>
-      <td>$PPV = \frac{TP}{TP + FP} = \frac{1}{N}\sum_{i=0}^{N-1} \hat{\delta}\left(\hat{\mathbf{y}}_i -
+      <td>Accuracy</td>
+      <td>$ACC = \frac{TP}{TP + FP} = \frac{1}{N}\sum_{i=0}^{N-1} \hat{\delta}\left(\hat{\mathbf{y}}_i -
         \mathbf{y}_i\right)$</td>
-    </tr>
-    <tr>
-      <td>Overall Recall</td>
-      <td>$TPR = \frac{TP}{TP + FN} = \frac{1}{N}\sum_{i=0}^{N-1} \hat{\delta}\left(\hat{\mathbf{y}}_i -
-        \mathbf{y}_i\right)$</td>
-    </tr>
-    <tr>
-      <td>Overall F1-measure</td>
-      <td>$F1 = 2 \cdot \left(\frac{PPV \cdot TPR}
-          {PPV + TPR}\right)$</td>
     </tr>
     <tr>
       <td>Precision by label</td>
@@ -472,13 +462,13 @@ $$rel_D(r) = \begin{cases}1 & \text{if $r \in D$}, \\ 0 & \text{otherwise}.\end{
       <td>Normalized Discounted Cumulative Gain</td>
       <td>
         $NDCG(k)=\frac{1}{M} \sum_{i=0}^{M-1} {\frac{1}{IDCG(D_i, k)}\sum_{j=0}^{n-1}
-          \frac{rel_{D_i}(R_i(j))}{\text{ln}(j+1)}} \\
+          \frac{rel_{D_i}(R_i(j))}{\text{ln}(j+2)}} \\
         \text{Where} \\
         \hspace{5 mm} n = \text{min}\left(\text{max}\left(|R_i|,|D_i|\right),k\right) \\
-        \hspace{5 mm} IDCG(D, k) = \sum_{j=0}^{\text{min}(\left|D\right|, k) - 1} \frac{1}{\text{ln}(j+1)}$
+        \hspace{5 mm} IDCG(D, k) = \sum_{j=0}^{\text{min}(\left|D\right|, k) - 1} \frac{1}{\text{ln}(j+2)}$
       </td>
       <td>
-        <a href="https://en.wikipedia.org/wiki/Information_retrieval#Discounted_cumulative_gain">NDCG at k</a> is a
+        <a href="https://en.wikipedia.org/wiki/Discounted_cumulative_gain#Normalized_DCG">NDCG at k</a> is a
         measure of how many of the first k recommended documents are in the set of true relevant documents averaged
         across all users. In contrast to precision at k, this metric takes into account the order of the recommendations
         (documents are assumed to be in order of decreasing relevance).
@@ -559,7 +549,7 @@ variable from a number of independent variables.
     </tr>
     <tr>
       <td>Mean Absolute Error (MAE)</td>
-      <td>$MAE=\sum_{i=0}^{N-1} \left|\mathbf{y}_i - \hat{\mathbf{y}}_i\right|$</td>
+      <td>$MAE=\frac{1}{N}\sum_{i=0}^{N-1} \left|\mathbf{y}_i - \hat{\mathbf{y}}_i\right|$</td>
     </tr>
     <tr>
       <td>Coefficient of Determination $(R^2)$</td>

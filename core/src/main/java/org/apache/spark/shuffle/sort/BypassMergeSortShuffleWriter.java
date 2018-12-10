@@ -37,12 +37,11 @@ import org.slf4j.LoggerFactory;
 import org.apache.spark.Partitioner;
 import org.apache.spark.ShuffleDependency;
 import org.apache.spark.SparkConf;
-import org.apache.spark.TaskContext;
-import org.apache.spark.executor.ShuffleWriteMetrics;
 import org.apache.spark.scheduler.MapStatus;
 import org.apache.spark.scheduler.MapStatus$;
 import org.apache.spark.serializer.Serializer;
 import org.apache.spark.serializer.SerializerInstance;
+import org.apache.spark.shuffle.ShuffleWriteMetricsReporter;
 import org.apache.spark.shuffle.IndexShuffleBlockResolver;
 import org.apache.spark.shuffle.ShuffleWriter;
 import org.apache.spark.storage.*;
@@ -52,8 +51,7 @@ import org.apache.spark.util.Utils;
  * This class implements sort-based shuffle's hash-style shuffle fallback path. This write path
  * writes incoming records to separate files, one file per reduce partition, then concatenates these
  * per-partition files to form a single output file, regions of which are served to reducers.
- * Records are not buffered in memory. This is essentially identical to
- * {@link org.apache.spark.shuffle.hash.HashShuffleWriter}, except that it writes output in a format
+ * Records are not buffered in memory. It writes output in a format
  * that can be served / consumed via {@link org.apache.spark.shuffle.IndexShuffleBlockResolver}.
  * <p>
  * This write path is inefficient for shuffles with large numbers of reduce partitions because it
@@ -61,7 +59,7 @@ import org.apache.spark.util.Utils;
  * {@link SortShuffleManager} only selects this write path when
  * <ul>
  *    <li>no Ordering is specified,</li>
- *    <li>no Aggregator is specific, and</li>
+ *    <li>no Aggregator is specified, and</li>
  *    <li>the number of partitions is less than
  *      <code>spark.shuffle.sort.bypassMergeThreshold</code>.</li>
  * </ul>
@@ -73,14 +71,14 @@ import org.apache.spark.util.Utils;
  */
 final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
 
-  private final Logger logger = LoggerFactory.getLogger(BypassMergeSortShuffleWriter.class);
+  private static final Logger logger = LoggerFactory.getLogger(BypassMergeSortShuffleWriter.class);
 
   private final int fileBufferSize;
   private final boolean transferToEnabled;
   private final int numPartitions;
   private final BlockManager blockManager;
   private final Partitioner partitioner;
-  private final ShuffleWriteMetrics writeMetrics;
+  private final ShuffleWriteMetricsReporter writeMetrics;
   private final int shuffleId;
   private final int mapId;
   private final Serializer serializer;
@@ -88,6 +86,7 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
 
   /** Array of file writers, one for each partition */
   private DiskBlockObjectWriter[] partitionWriters;
+  private FileSegment[] partitionWriterSegments;
   @Nullable private MapStatus mapStatus;
   private long[] partitionLengths;
 
@@ -103,8 +102,8 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
       IndexShuffleBlockResolver shuffleBlockResolver,
       BypassMergeSortShuffleHandle<K, V> handle,
       int mapId,
-      TaskContext taskContext,
-      SparkConf conf) {
+      SparkConf conf,
+      ShuffleWriteMetricsReporter writeMetrics) {
     // Use getSizeAsKb (not bytes) to maintain backwards compatibility if no units are provided
     this.fileBufferSize = (int) conf.getSizeAsKb("spark.shuffle.file.buffer", "32k") * 1024;
     this.transferToEnabled = conf.getBoolean("spark.file.transferTo", true);
@@ -114,7 +113,7 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     this.shuffleId = dep.shuffleId();
     this.partitioner = dep.partitioner();
     this.numPartitions = partitioner.numPartitions();
-    this.writeMetrics = taskContext.taskMetrics().shuffleWriteMetrics();
+    this.writeMetrics = writeMetrics;
     this.serializer = dep.serializer();
     this.shuffleBlockResolver = shuffleBlockResolver;
   }
@@ -131,6 +130,7 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     final SerializerInstance serInstance = serializer.newInstance();
     final long openStartTime = System.nanoTime();
     partitionWriters = new DiskBlockObjectWriter[numPartitions];
+    partitionWriterSegments = new FileSegment[numPartitions];
     for (int i = 0; i < numPartitions; i++) {
       final Tuple2<TempShuffleBlockId, File> tempShuffleBlockIdPlusFile =
         blockManager.diskBlockManager().createTempShuffleBlock();
@@ -150,14 +150,22 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
       partitionWriters[partitioner.getPartition(key)].write(key, record._2());
     }
 
-    for (DiskBlockObjectWriter writer : partitionWriters) {
-      writer.commitAndClose();
+    for (int i = 0; i < numPartitions; i++) {
+      try (DiskBlockObjectWriter writer = partitionWriters[i]) {
+        partitionWriterSegments[i] = writer.commitAndGet();
+      }
     }
 
     File output = shuffleBlockResolver.getDataFile(shuffleId, mapId);
     File tmp = Utils.tempFileWith(output);
-    partitionLengths = writePartitionedFile(tmp);
-    shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, tmp);
+    try {
+      partitionLengths = writePartitionedFile(tmp);
+      shuffleBlockResolver.writeIndexFileAndCommit(shuffleId, mapId, partitionLengths, tmp);
+    } finally {
+      if (tmp.exists() && !tmp.delete()) {
+        logger.error("Error while deleting temp file {}", tmp.getAbsolutePath());
+      }
+    }
     mapStatus = MapStatus$.MODULE$.apply(blockManager.shuffleServerId(), partitionLengths);
   }
 
@@ -184,7 +192,7 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
     boolean threwException = true;
     try {
       for (int i = 0; i < numPartitions; i++) {
-        final File file = partitionWriters[i].fileSegment().file();
+        final File file = partitionWriterSegments[i].file();
         if (file.exists()) {
           final FileInputStream in = new FileInputStream(file);
           boolean copyThrewException = true;
@@ -234,7 +242,6 @@ final class BypassMergeSortShuffleWriter<K, V> extends ShuffleWriter<K, V> {
             partitionWriters = null;
           }
         }
-        shuffleBlockResolver.removeDataByMap(shuffleId, mapId);
         return None$.empty();
       }
     }

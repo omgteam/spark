@@ -15,6 +15,9 @@
 # limitations under the License.
 #
 
+import sys
+import warnings
+
 from pyspark import since
 from pyspark.mllib.common import JavaModelWrapper, callMLlibFunc
 from pyspark.sql import SQLContext
@@ -114,9 +117,9 @@ class RegressionMetrics(JavaModelWrapper):
     @property
     @since('1.4.0')
     def explainedVariance(self):
-        """
+        r"""
         Returns the explained variance regression score.
-        explainedVariance = 1 - variance(y - \hat{y}) / variance(y)
+        explainedVariance = :math:`1 - \frac{variance(y - \hat{y})}{variance(y)}`
         """
         return self.call("explainedVariance")
 
@@ -177,9 +180,7 @@ class MulticlassMetrics(JavaModelWrapper):
     1.0...
     >>> metrics.fMeasure(0.0, 2.0)
     0.52...
-    >>> metrics.precision()
-    0.66...
-    >>> metrics.recall()
+    >>> metrics.accuracy
     0.66...
     >>> metrics.weightedFalsePositiveRate
     0.19...
@@ -228,40 +229,37 @@ class MulticlassMetrics(JavaModelWrapper):
         return self.call("falsePositiveRate", label)
 
     @since('1.4.0')
-    def precision(self, label=None):
+    def precision(self, label):
         """
-        Returns precision or precision for a given label (category) if specified.
+        Returns precision.
         """
-        if label is None:
-            return self.call("precision")
-        else:
-            return self.call("precision", float(label))
+        return self.call("precision", float(label))
 
     @since('1.4.0')
-    def recall(self, label=None):
+    def recall(self, label):
         """
-        Returns recall or recall for a given label (category) if specified.
+        Returns recall.
         """
-        if label is None:
-            return self.call("recall")
-        else:
-            return self.call("recall", float(label))
+        return self.call("recall", float(label))
 
     @since('1.4.0')
-    def fMeasure(self, label=None, beta=None):
+    def fMeasure(self, label, beta=None):
         """
-        Returns f-measure or f-measure for a given label (category) if specified.
+        Returns f-measure.
         """
         if beta is None:
-            if label is None:
-                return self.call("fMeasure")
-            else:
-                return self.call("fMeasure", label)
+            return self.call("fMeasure", label)
         else:
-            if label is None:
-                raise Exception("If the beta parameter is specified, label can not be none")
-            else:
-                return self.call("fMeasure", label, beta)
+            return self.call("fMeasure", label, beta)
+
+    @property
+    @since('2.0.0')
+    def accuracy(self):
+        """
+        Returns accuracy (equals to the total number of correctly classified instances
+        out of the total number of instances).
+        """
+        return self.call("accuracy")
 
     @property
     @since('1.4.0')
@@ -516,14 +514,24 @@ class MultilabelMetrics(JavaModelWrapper):
 
 def _test():
     import doctest
-    from pyspark import SparkContext
+    import numpy
+    from pyspark.sql import SparkSession
     import pyspark.mllib.evaluation
+    try:
+        # Numpy 1.14+ changed it's string format.
+        numpy.set_printoptions(legacy='1.13')
+    except TypeError:
+        pass
     globs = pyspark.mllib.evaluation.__dict__.copy()
-    globs['sc'] = SparkContext('local[4]', 'PythonTest')
+    spark = SparkSession.builder\
+        .master("local[4]")\
+        .appName("mllib.evaluation tests")\
+        .getOrCreate()
+    globs['sc'] = spark.sparkContext
     (failure_count, test_count) = doctest.testmod(globs=globs, optionflags=doctest.ELLIPSIS)
-    globs['sc'].stop()
+    spark.stop()
     if failure_count:
-        exit(-1)
+        sys.exit(-1)
 
 
 if __name__ == "__main__":

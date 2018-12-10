@@ -19,6 +19,7 @@
 Python package for random data generation.
 """
 
+import sys
 from functools import wraps
 
 from pyspark import since
@@ -409,15 +410,19 @@ class RandomRDDs(object):
 
 def _test():
     import doctest
-    from pyspark.context import SparkContext
+    from pyspark.sql import SparkSession
     globs = globals().copy()
     # The small batch size here ensures that we see multiple batches,
     # even in these small test examples:
-    globs['sc'] = SparkContext('local[2]', 'PythonTest', batchSize=2)
+    spark = SparkSession.builder\
+        .master("local[2]")\
+        .appName("mllib.random tests")\
+        .getOrCreate()
+    globs['sc'] = spark.sparkContext
     (failure_count, test_count) = doctest.testmod(globs=globs, optionflags=doctest.ELLIPSIS)
-    globs['sc'].stop()
+    spark.stop()
     if failure_count:
-        exit(-1)
+        sys.exit(-1)
 
 
 if __name__ == "__main__":

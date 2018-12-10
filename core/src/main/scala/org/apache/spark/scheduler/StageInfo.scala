@@ -19,8 +19,8 @@ package org.apache.spark.scheduler
 
 import scala.collection.mutable.HashMap
 
-import org.apache.spark.Accumulator
 import org.apache.spark.annotation.DeveloperApi
+import org.apache.spark.executor.TaskMetrics
 import org.apache.spark.storage.RDDInfo
 
 /**
@@ -30,13 +30,13 @@ import org.apache.spark.storage.RDDInfo
 @DeveloperApi
 class StageInfo(
     val stageId: Int,
-    val attemptId: Int,
+    private val attemptId: Int,
     val name: String,
     val numTasks: Int,
     val rddInfos: Seq[RDDInfo],
     val parentIds: Seq[Int],
     val details: String,
-    val internalAccumulators: Seq[Accumulator[_]] = Seq.empty,
+    val taskMetrics: TaskMetrics = null,
     private[spark] val taskLocalityPreferences: Seq[Seq[TaskLocation]] = Seq.empty) {
   /** When this stage was submitted from the DAGScheduler to a TaskScheduler. */
   var submissionTime: Option[Long] = None
@@ -55,6 +55,10 @@ class StageInfo(
     failureReason = Some(reason)
     completionTime = Some(System.currentTimeMillis)
   }
+
+  // This would just be the second constructor arg, except we need to maintain this method
+  // with parentheses for compatibility
+  def attemptNumber(): Int = attemptId
 
   private[spark] def getStatusString: String = {
     if (completionTime.isDefined) {
@@ -81,7 +85,7 @@ private[spark] object StageInfo {
       stage: Stage,
       attemptId: Int,
       numTasks: Option[Int] = None,
-      internalAccumulators: Seq[Accumulator[_]] = Seq.empty,
+      taskMetrics: TaskMetrics = null,
       taskLocalityPreferences: Seq[Seq[TaskLocation]] = Seq.empty
     ): StageInfo = {
     val ancestorRddInfos = stage.rdd.getNarrowAncestors.map(RDDInfo.fromRdd)
@@ -94,7 +98,7 @@ private[spark] object StageInfo {
       rddInfos,
       stage.parents.map(_.id),
       stage.details,
-      internalAccumulators,
+      taskMetrics,
       taskLocalityPreferences)
   }
 }

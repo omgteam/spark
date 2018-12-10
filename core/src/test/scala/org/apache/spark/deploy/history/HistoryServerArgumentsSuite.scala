@@ -33,38 +33,22 @@ class HistoryServerArgumentsSuite extends SparkFunSuite {
     .set("spark.testing", "true")
 
   test("No Arguments Parsing") {
-    val argStrings = Array[String]()
+    val argStrings = Array.empty[String]
     val hsa = new HistoryServerArguments(conf, argStrings)
     assert(conf.get("spark.history.fs.logDirectory") === logDir.getAbsolutePath)
     assert(conf.get("spark.history.fs.updateInterval") === "1")
     assert(conf.get("spark.testing") === "true")
   }
 
-  test("Directory Arguments Parsing --dir or -d") {
-    val argStrings = Array("--dir", "src/test/resources/spark-events1")
-    val hsa = new HistoryServerArguments(conf, argStrings)
-    assert(conf.get("spark.history.fs.logDirectory") === "src/test/resources/spark-events1")
-  }
-
-  test("Directory Param can also be set directly") {
-    val argStrings = Array("src/test/resources/spark-events2")
-    val hsa = new HistoryServerArguments(conf, argStrings)
-    assert(conf.get("spark.history.fs.logDirectory") === "src/test/resources/spark-events2")
-  }
-
   test("Properties File Arguments Parsing --properties-file") {
-    val tmpDir = Utils.createTempDir()
-    val outFile = File.createTempFile("test-load-spark-properties", "test", tmpDir)
-    try {
+    withTempDir { tmpDir =>
+      val outFile = File.createTempFile("test-load-spark-properties", "test", tmpDir)
       Files.write("spark.test.CustomPropertyA blah\n" +
         "spark.test.CustomPropertyB notblah\n", outFile, UTF_8)
       val argStrings = Array("--properties-file", outFile.getAbsolutePath)
       val hsa = new HistoryServerArguments(conf, argStrings)
       assert(conf.get("spark.test.CustomPropertyA") === "blah")
       assert(conf.get("spark.test.CustomPropertyB") === "notblah")
-    } finally {
-      Utils.deleteRecursively(tmpDir)
     }
   }
-
 }

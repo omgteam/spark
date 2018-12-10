@@ -16,6 +16,8 @@
 #
 
 from math import exp
+import sys
+import warnings
 
 import numpy
 from numpy import array
@@ -47,11 +49,9 @@ class LinearClassificationModel(LinearModel):
     @since('1.4.0')
     def setThreshold(self, value):
         """
-        .. note:: Experimental
-
         Sets the threshold that separates positive predictions from
         negative predictions. An example with prediction score greater
-        than or equal to this threshold is identified as an positive,
+        than or equal to this threshold is identified as a positive,
         and negative otherwise. It is used for binary classification
         only.
         """
@@ -61,8 +61,6 @@ class LinearClassificationModel(LinearModel):
     @since('1.4.0')
     def threshold(self):
         """
-        .. note:: Experimental
-
         Returns the threshold (if any) used for converting raw
         prediction scores into 0/1 predictions. It is used for
         binary classification only.
@@ -72,8 +70,6 @@ class LinearClassificationModel(LinearModel):
     @since('1.4.0')
     def clearThreshold(self):
         """
-        .. note:: Experimental
-
         Clears the threshold so that `predict` will output raw
         prediction scores. It is used for binary classification only.
         """
@@ -176,7 +172,7 @@ class LogisticRegressionModel(LinearClassificationModel):
             self._dataWithBiasSize = None
             self._weightsMatrix = None
         else:
-            self._dataWithBiasSize = self._coeff.size / (self._numClasses - 1)
+            self._dataWithBiasSize = self._coeff.size // (self._numClasses - 1)
             self._weightsMatrix = self._coeff.toArray().reshape(self._numClasses - 1,
                                                                 self._dataWithBiasSize)
 
@@ -262,10 +258,15 @@ class LogisticRegressionModel(LinearClassificationModel):
         model.setThreshold(threshold)
         return model
 
+    def __repr__(self):
+        return self._call_java("toString")
+
 
 class LogisticRegressionWithSGD(object):
     """
     .. versionadded:: 0.9.0
+    .. note:: Deprecated in 2.0.0. Use ml.classification.LogisticRegression or
+            LogisticRegressionWithLBFGS.
     """
     @classmethod
     @since('0.9.0')
@@ -312,6 +313,10 @@ class LogisticRegressionWithSGD(object):
           A condition which decides iteration termination.
           (default: 0.001)
         """
+        warnings.warn(
+            "Deprecated in 2.0.0. Use ml.classification.LogisticRegression or "
+            "LogisticRegressionWithLBFGS.", DeprecationWarning)
+
         def train(rdd, i):
             return callMLlibFunc("trainLogisticRegressionModelWithSGD", rdd, int(iterations),
                                  float(step), float(miniBatchFraction), i, float(regParam), regType,
@@ -749,14 +754,18 @@ class StreamingLogisticRegressionWithSGD(StreamingLinearAlgorithm):
 
 def _test():
     import doctest
-    from pyspark import SparkContext
+    from pyspark.sql import SparkSession
     import pyspark.mllib.classification
     globs = pyspark.mllib.classification.__dict__.copy()
-    globs['sc'] = SparkContext('local[4]', 'PythonTest', batchSize=2)
+    spark = SparkSession.builder\
+        .master("local[4]")\
+        .appName("mllib.classification tests")\
+        .getOrCreate()
+    globs['sc'] = spark.sparkContext
     (failure_count, test_count) = doctest.testmod(globs=globs, optionflags=doctest.ELLIPSIS)
-    globs['sc'].stop()
+    spark.stop()
     if failure_count:
-        exit(-1)
+        sys.exit(-1)
 
 if __name__ == "__main__":
     _test()
